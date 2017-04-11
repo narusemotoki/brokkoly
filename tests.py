@@ -330,9 +330,9 @@ def test_producer():
 
 def test_fibonacci_wait():
     retry_count = 10
-    fibonacci_wait = brokkoly.retry.FibonacciWait(retry_count)
+    fibonacci_wait = brokkoly.retry.FibonacciWait(retry_count, 80)
     assert fibonacci_wait.max_retries == retry_count
     assert fibonacci_wait.retry_method == brokkoly.retry.RetryMethod.countdown
 
-    for i, expect in enumerate([1, 2, 3, 5, 8, 13, 21, 34, 55, 89]):
+    for i, expect in enumerate([1, 2, 3, 5, 8, 13, 21, 34, 55, 80]):
         assert fibonacci_wait.countdown(i, None) == expect

@@ -81,11 +81,15 @@ class Brokkoly:
                     if not retry_policy:
                         raise e
                     error = e
-                celery_task.retry(
-                    countdown=retry_policy.countdown(celery_task.request.retries, error),
-                    max_retries=retry_policy.max_retries,
-                    exc=error
-                )
+                try:
+                    celery_task.retry(
+                        countdown=retry_policy.countdown(celery_task.request.retries, error),
+                        max_retries=retry_policy.max_retries,
+                        exc=error
+                    )
+                except Exception as e:
+                    # TODO: このtry exceptがmax_retriesを超過した時に有効化確認する
+                    print("Catch!!", e)
 
             self._tasks[f.__name__] = (
                 Processor(self.celery.task(handle, bind=True), _prepare_validation(f)),
