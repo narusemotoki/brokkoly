@@ -32,7 +32,7 @@ __credits__ = ["Motoki Naruse"]
 __email__ = "motoki@naru.se"
 __license__ = "MIT"
 __maintainer__ = "Motoki Naruse"
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 Validation = List[Tuple[str, Any]]
@@ -43,6 +43,7 @@ _tasks = collections.defaultdict(dict)  # type: collections.defaultdict
 
 
 logger = logging.getLogger(__name__)
+brokkoly.database.db.dbname = "brokkoly.db"
 
 
 class BrokkolyError(Exception):
@@ -56,6 +57,7 @@ class Brokkoly:
             raise BrokkolyError("Queue name starting with _ is not allowed.")
         self.celery = celery.Celery(name, broker=broker)
         self._tasks = _tasks[name]
+        self.connection_manager = brokkoly.database.db
 
     def task(
             self, *preprocessors: Callable, retry_policy: Optional[brokkoly.retry.RetryPolicy]=None
@@ -74,30 +76,42 @@ class Brokkoly:
             if f.__name__ in self._tasks:
                 raise BrokkolyError("{} is already registered.".format(f.__name__))
 
-            def handle(celery_task, *args, **kwargs) -> None:
+            def handle(celery_task, meta: Dict[str, Any], args: Dict[str, Any]) -> None:
+                self.connection_manager.reconnect()
+                connection = self.connection_manager.get()
+                message_log = brokkoly.database.MessageLog.get_by_id(meta['message_log_id'])
                 try:
-                    return f(*args, **kwargs)
+                    result = f(**args)
+                    message_log.complete()
+                    connection.commit()
+                    connection.close()
                 except Exception as e:
                     if not retry_policy:
-                        raise e
+                        raise
                     error = e
+                else:
+                    return result
+
                 try:
                     celery_task.retry(
                         countdown=retry_policy.countdown(celery_task.request.retries, error),
                         max_retries=retry_policy.max_retries,
                         exc=error
                     )
+                except celery.exceptions.Retry:
+                    connection.close()
+                    raise
                 except Exception as e:
-                    # TODO: このtry exceptがmax_retriesを超過した時に有効化確認する
-                    print("Catch!!", e)
+                    message_log.complete()
+                else:
+                    message_log.complete()
+                connection.commit()
+                connection.close()
 
             self._tasks[f.__name__] = (
                 Processor(self.celery.task(handle, bind=True), _prepare_validation(f)),
                 [
-                    Processor(
-                        preprocessor,
-                        _prepare_validation(preprocessor)
-                    )
+                    Processor(preprocessor, _prepare_validation(preprocessor))
                     for preprocessor in preprocessors
                 ]
             )
@@ -197,13 +211,19 @@ class Producer:
         except KeyError:
             raise falcon.HTTPBadRequest("Invalid JSON", "JSON must have message field")
 
+        message_log = brokkoly.database.MessageLog.create(
+            queue_name, task_name, json.dumps(message))
         task.apply_async(
-            kwargs=_validate(self._recurse(message, preprocessors), validation),
+            kwargs={
+                'meta': {
+                    'message_log_id': message_log.id
+                },
+                'args': _validate(self._recurse(message, preprocessors), validation)
+            },
             serializer='json',
             compression='zlib',
             countdown=payload.get('delay', 0)
         )
-        brokkoly.database.MessageLog.create(queue_name, task_name, json.dumps(message))
         brokkoly.database.MessageLog.eliminate(queue_name, task_name)
         resp.status = falcon.HTTP_202
         resp.body = "{}"
@@ -318,7 +338,6 @@ def init_logger(log_level: int) -> None:
 
 def producer(*, path: Optional[str]=None, log_level=logging.ERROR) -> falcon.api.API:
     init_logger(log_level)
-    brokkoly.database.db.dbname = "brokkoly.db"
 
     brokkoly.database.Migrator(__version__).migrate()
 

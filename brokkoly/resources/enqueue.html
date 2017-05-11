@@ -3,19 +3,28 @@
 {% block content %}
 <h1>Enqueue for {{ queue_name }}/{{ task_name }}</h1>
 <div class="row">
-    <div class="col-7">
+    <div class="col">
         <div id="error" class="alert alert-danger" role="alert"></div>
         <div id="editor"></div>
         <button class="btn btn-primary" type="button" id="submit">Enqueue</button>
-    </div>
-    <div class="col-5">
+        <hr>
         <h4>Past Messages</h4>
         <div class="list-group">
             {% for message in messages %}
-            <div class="list-group-item list-group-item-action flex-column align-items-start">
-                <div class="d-flex w-100 justify-content-between">
-                    {% highlight 'json' %}{{ message.message | pretty_print_json }}{% endhighlight %}
-                    <small class="text-muted">{{ message.created_at }}</small>
+            <div class="flex-column list-group-item list-group-item-action align-items-start">
+                <div class="row">
+                    <div class="col">
+                        {% highlight 'json' %}{{ message.message | pretty_print_json }}{% endhighlight %}
+                    </div>
+                    <div class="col">
+                        <ul class="list-group">
+                            <li><small class="text-muted">Enqued: {{ message.created_at }}</small></li>
+                            <li><small class="text-muted">Processed: {{ message.completed_at }}</small></li>
+                        </ul>
+                    </div>
+                </div>
+                <div>
+                    <button class="btn" data-message-id="{{ message.id }}">Enqueue</button>
                 </div>
             </div>
             {% endfor %}

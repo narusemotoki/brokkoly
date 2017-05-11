@@ -110,13 +110,31 @@ class Migrator:
 class MessageLog:
     def __init__(
             self, *, id: int=None, queue_name: str, task_name: str, message: str,
-            created_at: datetime.datetime
+            created_at: datetime.datetime, completed_at: datetime.datetime=None
     ) -> None:
         self.id = id
         self.queue_name = queue_name
         self.task_name = task_name
         self.message = message
         self.created_at = created_at
+        self.completed_at = completed_at
+
+    def complete(self) -> None:
+        with contextlib.closing(db.get().cursor()) as cursor:
+            cursor.execute(
+                """
+                UPDATE message_logs
+                SET completed_at = CURRENT_TIMESTAMP
+                WHERE message_logs.id = ?
+                ;
+                """,
+                (self.id, )
+            )
+            cursor.execute(
+                "SELECT message_logs.completed_at FROM message_logs WHERE message_logs.id = ?",
+                (self.id, )
+            )
+            self.completed_at = cursor.fetchone()['completed_at']
 
     @classmethod
     def get_by_id(cls, id: int) -> Optional['MessageLog']:
